@@ -1,0 +1,12 @@
+{
+  "circleci-yaml": {
+    "command": "${CLAUDE_PLUGIN_ROOT}/bin/circleci-yaml-lsp",
+    "args": [],
+    "transport": "stdio",
+    "extensionToLanguage": {
+      ".yml": "yaml",
+      ".yaml": "yaml"
+    },
+    "startupTimeout": 180000
+  }
+}

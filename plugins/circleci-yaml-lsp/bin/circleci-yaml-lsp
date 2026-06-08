@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+#
+# circleci-yaml-lsp — launcher for the Claude Code plugin.
+#
+# Provisions and starts CircleCI's circleci-yaml-language-server as an LSP
+# server speaking JSON-RPC over stdio. On first run it downloads the pinned
+# prebuilt server binary for this platform from CircleCI's official GitHub
+# Releases into a persistent cache, verifies its SHA-256 (and size), and runs it.
+#
+# By default it routes the server through lsp-proxy.mjs (Node), which scopes
+# analysis to CircleCI config files. The CircleCI server treats EVERY YAML
+# document as a CircleCI config, so without scoping it mis-validates unrelated
+# YAML. Scoping therefore requires Node; if Node is absent the launcher fails
+# closed (rather than silently mis-flagging) unless you opt into broad mode.
+#
+# Environment overrides:
+#   CIRCLECI_YAML_LSP_BINARY  Absolute path to a server binary; skips download.
+#   CIRCLECI_YAML_LSP_NODE    Path to a node executable for the scoping proxy.
+#   CIRCLECI_YAML_LSP_SCOPE   "off" => run without scoping (validate ALL YAML).
+#   CIRCLECI_YAML_LSP_TOKEN   CircleCI API token (enables private-orb resolution; see proxy).
+#   CIRCLECI_YAML_LSP_SELF_HOSTED_URL  CircleCI Server base URL (self-hosted).
+#   CIRCLECI_YAML_LSP_SCOPE_PATTERN    Regex (read by the proxy) overriding which URIs are in scope.
+#
+set -eu
+
+VERSION="0.35.0"
+REPO="CircleCI-Public/circleci-yaml-language-server"
+
+log() { printf '[circleci-yaml-lsp] %s\n' "$1" >&2; }
+die() { log "error: $1"; exit 1; }
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else return 1; fi
+}
+
+SERVER_BIN="${CIRCLECI_YAML_LSP_BINARY:-}"
+
+if [ -z "$SERVER_BIN" ]; then
+  os="$(uname -s)"; arch="$(uname -m)"
+  case "$os" in
+    Darwin) o="darwin" ;;
+    Linux)  o="linux" ;;
+    *) die "unsupported OS '$os'. On Windows, run via WSL or Git Bash and set CIRCLECI_YAML_LSP_BINARY to a downloaded windows-amd64-lsp.exe from https://github.com/$REPO/releases/tag/$VERSION" ;;
+  esac
+  case "$arch" in
+    arm64|aarch64) a="arm64" ;;
+    x86_64|amd64)  a="amd64" ;;
+    *) die "unsupported architecture '$arch'" ;;
+  esac
+  asset="${o}-${a}-lsp"
+
+  # Pinned-release integrity (CircleCI publishes no checksum file). Update size
+  # AND sha together with VERSION — see scripts/update-pins.sh. size/sha "" skips the check.
+  case "$asset" in
+    darwin-arm64-lsp) expected_size=12937906; expected_sha="b1aabb382297b0c86da48298abccf646b607a2eec243413e230456b8b5f2b517" ;;
+    darwin-amd64-lsp) expected_size=13878416; expected_sha="bf023ef699e3519a1569e1e42800d9334ef7c6e32cef734f51f7b540aa4db52b" ;;
+    linux-amd64-lsp)  expected_size=19726728; expected_sha="e8d56d8101957e5ab47b07c99a031269082cd3a6b00b8311fe32aa511bd96d56" ;;
+    linux-arm64-lsp)  expected_size=18359840; expected_sha="77a6928e3678cfe07529ad756a193890f01253c5ea2c57e8e72f6b410eb0e9d3" ;;
+    *) expected_size=0; expected_sha="" ;;
+  esac
+
+  # Persistent, version-keyed cache (survives plugin updates). Prefer Claude
+  # Code's per-plugin data dir; fall back to XDG / HOME / /tmp.
+  cache_root="${CLAUDE_PLUGIN_DATA:-${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/circleci-yaml-lsp}"
+  bindir="$cache_root/bin/$VERSION"
+  SERVER_BIN="$bindir/$asset"
+
+  if [ ! -x "$SERVER_BIN" ]; then
+    mkdir -p "$bindir"
+    url="https://github.com/$REPO/releases/download/$VERSION/$asset"
+    tmp="$SERVER_BIN.download.$$"
+    trap 'rm -f "$tmp"' EXIT   # don't leak a partial file if interrupted/failed
+    log "downloading circleci-yaml-language-server $VERSION ($asset)…"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --retry 3 "$url" -o "$tmp" || die "download failed: $url"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO "$tmp" "$url" || die "download failed: $url"
+    else
+      die "need curl or wget on PATH to download the language server"
+    fi
+
+    actual_size="$(wc -c < "$tmp" | tr -d ' ')"
+    if [ "$expected_size" -ne 0 ] && [ "$actual_size" != "$expected_size" ]; then
+      die "size mismatch for $asset (got $actual_size, expected $expected_size) — refusing to run"
+    fi
+    if [ -n "$expected_sha" ]; then
+      if actual_sha="$(sha256_of "$tmp")"; then
+        [ "$actual_sha" = "$expected_sha" ] || die "SHA-256 mismatch for $asset — refusing to run (expected $expected_sha, got $actual_sha)"
+      else
+        log "warning: no sha256 tool found; verified size only for $asset"
+      fi
+    fi
+
+    chmod +x "$tmp"
+    mv -f "$tmp" "$SERVER_BIN"
+    trap - EXIT
+    log "installed $asset to $SERVER_BIN"
+  fi
+fi
+
+[ -x "$SERVER_BIN" ] || die "language server binary is not executable: $SERVER_BIN"
+
+# Find the scoping proxy shipped alongside this script.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PROXY="$SCRIPT_DIR/lsp-proxy.mjs"
+
+find_node() {
+  if [ -n "${CIRCLECI_YAML_LSP_NODE:-}" ] && [ -x "${CIRCLECI_YAML_LSP_NODE}" ]; then
+    printf '%s' "$CIRCLECI_YAML_LSP_NODE"; return 0
+  fi
+  command -v node 2>/dev/null && return 0
+  return 1
+}
+
+# Broad mode: explicit opt-in only.
+if [ "${CIRCLECI_YAML_LSP_SCOPE:-on}" = "off" ]; then
+  log "scoping disabled (CIRCLECI_YAML_LSP_SCOPE=off): every YAML file will be validated as a CircleCI config."
+  exec "$SERVER_BIN" -stdio
+fi
+
+# Scoped mode (default) requires the Node proxy. Fail closed rather than silently
+# mis-flagging non-CircleCI YAML.
+[ -f "$PROXY" ] || die "scoping proxy missing at $PROXY — reinstall the plugin, or set CIRCLECI_YAML_LSP_SCOPE=off"
+
+if NODE_BIN="$(find_node)"; then
+  exec "$NODE_BIN" "$PROXY" "$SERVER_BIN"
+fi
+
+die "Node.js is required to scope diagnostics to CircleCI config files, but 'node' was not found. Install Node.js, or set CIRCLECI_YAML_LSP_NODE=/path/to/node, or set CIRCLECI_YAML_LSP_SCOPE=off to run without scoping (validates ALL YAML as CircleCI config)."

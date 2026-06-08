@@ -1,0 +1,16 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-marketplace.json",
+  "name": "circleci-lsp",
+  "owner": {
+    "name": "Roger Winter",
+    "url": "https://github.com/rogerwintercircleci"
+  },
+  "description": "CircleCI language tooling for Claude Code.",
+  "plugins": [
+    {
+      "name": "circleci-yaml-lsp",
+      "source": "./plugins/circleci-yaml-lsp",
+      "description": "CircleCI config language server: diagnostics, navigation, and validation for .circleci/config.yml."
+    }
+  ]
+}

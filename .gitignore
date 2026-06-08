@@ -1,0 +1,12 @@
+# Local scratch: upstream clone, downloaded binaries, smoke-test harnesses
+.scratch/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+
+# Node (none committed, but just in case)
+node_modules/
+
+# Logs
+*.log
