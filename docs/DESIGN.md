@@ -82,6 +82,13 @@ so a name used in multiple contexts resolves to its first schema definition. In-
 comes from the proxy's document mirror, falling back to reading the file from disk when the
 proxy started after the document was already open (e.g. a plugin reload).
 
+The `HOVER_DOCS` table is **generated**, not hand-maintained: `scripts/gen-hover-docs.mjs`
+downloads the `schema.json` for the version pinned in the launcher and rewrites the
+`<generated:hover-docs>` block in `lsp-hover.mjs`. It runs as part of `scripts/update-pins.sh`
+(so a server-version bump refreshes the docs in lockstep) and CI fails if the committed table
+is stale (`npm run check:hover-docs`). The curated `OVERRIDES` table is a separate, hand-written
+layer applied over the generated docs and is never touched by the generator.
+
 **Why Node, and why fail closed without it.** The proxy needs a runtime; Node is the
 pragmatic choice because Claude Code itself is a Node application, so it's almost always
 present. Scoping is the whole point, so if Node is genuinely missing the launcher **fails

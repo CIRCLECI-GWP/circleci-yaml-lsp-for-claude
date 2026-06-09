@@ -31,6 +31,9 @@ jobs:
               node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" || exit 1
               echo "ok: $f"
             done
+      - run:
+          name: Hover docs are generated, not hand-edited
+          command: npm run check:hover-docs
 
   test:
     docker:
