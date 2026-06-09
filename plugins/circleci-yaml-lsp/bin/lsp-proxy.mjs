@@ -18,6 +18,7 @@
 //   CIRCLECI_YAML_LSP_SELF_HOSTED_URL CircleCI Server base URL; sent via setSelfHostedUrl.
 
 import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 
 const serverBin = process.argv[2];
 if (!serverBin) {
@@ -49,6 +50,18 @@ const SYNC_METHODS = new Set([
 const TOKEN = process.env.CIRCLECI_YAML_LSP_TOKEN || "";
 const SELF_HOSTED = process.env.CIRCLECI_YAML_LSP_SELF_HOSTED_URL || "";
 const SENTINEL = "__cci_proxy__"; // id prefix for commands we inject; their replies are swallowed
+
+// Optional traffic log for debugging: set CIRCLECI_YAML_LSP_DEBUG=/path/to/log.
+const DEBUG = process.env.CIRCLECI_YAML_LSP_DEBUG || "";
+function dbg(dir, msg) {
+  if (!DEBUG || !msg) return;
+  let line = `${dir} ${msg.method || "resp id=" + msg.id}`;
+  const uri = msg.params?.textDocument?.uri || msg.params?.uri;
+  if (uri) line += ` uri=${uri.split("/").pop()}`;
+  if (msg.method === "textDocument/didOpen") line += ` textLen=${(msg.params.textDocument.text || "").length}`;
+  if (msg.method === "textDocument/didChange") line += ` v=${msg.params.textDocument?.version} changes=${JSON.stringify((msg.params.contentChanges || []).map((c) => ({ range: c.range, textLen: (c.text || "").length })))}`;
+  try { appendFileSync(DEBUG, line + "\n"); } catch { /* ignore */ }
+}
 
 const server = spawn(serverBin, ["-stdio"], { stdio: ["pipe", "pipe", "pipe"] });
 server.on("error", (e) => {
@@ -89,14 +102,63 @@ function makeReader(onMessage) {
   };
 }
 
-// Client (Claude Code) -> server: drop out-of-scope document-sync notifications.
-const fromClient = makeReader((msg, body) => {
-  if (msg && SYNC_METHODS.has(msg.method) && !inScope(msg?.params?.textDocument?.uri)) {
-    return; // keep this file away from the CircleCI server
+// Mirror of each in-scope document's full text, so we can replay edits as opens.
+const docText = new Map();
+
+// LSP position (line, UTF-16 character) -> string offset. JS strings are UTF-16,
+// so character maps to a string index directly for the common (BMP) case.
+function posToOffset(text, pos) {
+  if (!pos) return text.length;
+  let i = 0;
+  for (let line = 0; line < pos.line; line++) {
+    const nl = text.indexOf("\n", i);
+    if (nl === -1) return text.length;
+    i = nl + 1;
   }
+  return Math.min(i + (pos.character || 0), text.length);
+}
+// Apply LSP content changes (full-replace or incremental) to produce new full text.
+function applyEdits(text, changes) {
+  for (const c of changes || []) {
+    if (!c) continue;
+    if (c.range == null) { if (typeof c.text === "string") text = c.text; continue; }
+    const s = posToOffset(text, c.range.start);
+    const e = posToOffset(text, c.range.end);
+    text = text.slice(0, s) + (c.text || "") + text.slice(e);
+  }
+  return text;
+}
+
+// Client (Claude Code) -> server.
+const fromClient = makeReader((msg, body) => {
+  dbg(">>", msg);
+  if (msg && SYNC_METHODS.has(msg.method) && !inScope(msg?.params?.textDocument?.uri)) {
+    return; // keep non-CircleCI files away from the server
+  }
+
+  // The server duplicates a document's content when it receives didChange (verified
+  // against 0.35.0). Track the full text ourselves and replay every change as a
+  // didOpen, which the server applies cleanly. didOpen/didClose pass through.
+  if (msg && msg.method === "textDocument/didOpen") {
+    docText.set(msg.params.textDocument.uri, msg.params.textDocument.text || "");
+    server.stdin.write(withHeader(body));
+    return;
+  }
+  if (msg && msg.method === "textDocument/didChange") {
+    const uri = msg.params.textDocument?.uri;
+    const text = applyEdits(docText.get(uri) ?? "", msg.params.contentChanges);
+    docText.set(uri, text);
+    sendToServer({ jsonrpc: "2.0", method: "textDocument/didOpen", params: { textDocument: { uri, languageId: "yaml", version: msg.params.textDocument?.version ?? 0, text } } });
+    return;
+  }
+  if (msg && msg.method === "textDocument/didClose") {
+    docText.delete(msg.params.textDocument?.uri);
+    server.stdin.write(withHeader(body));
+    return;
+  }
+
   server.stdin.write(withHeader(body));
-  // After the client signals initialization is complete, optionally authenticate
-  // so the server can resolve private orbs / contexts / self-hosted runners.
+  // After initialization, optionally authenticate for private orbs / self-hosted.
   if (msg && msg.method === "initialized") {
     if (SELF_HOSTED) sendToServer({ jsonrpc: "2.0", id: SENTINEL + "url", method: "workspace/executeCommand", params: { command: "setSelfHostedUrl", arguments: [SELF_HOSTED] } });
     if (TOKEN) sendToServer({ jsonrpc: "2.0", id: SENTINEL + "token", method: "workspace/executeCommand", params: { command: "setToken", arguments: [TOKEN] } });
@@ -106,7 +168,20 @@ const fromClient = makeReader((msg, body) => {
 // Server -> client: swallow replies to our injected commands; defensively
 // suppress diagnostics for out-of-scope files.
 const fromServer = makeReader((msg, body) => {
+  dbg("<<", msg);
   if (msg && typeof msg.id === "string" && msg.id.startsWith(SENTINEL)) return;
+  // Force FULL document sync in the initialize response. The server advertises
+  // incremental sync, but some clients send a full-text change with a zero-width
+  // range, which the server misapplies and duplicates the document. Advertising
+  // full sync makes the client always send the whole document, which is replaced
+  // wholesale.
+  if (msg && msg.result && msg.result.capabilities && "textDocumentSync" in msg.result.capabilities) {
+    const sync = msg.result.capabilities.textDocumentSync;
+    msg.result.capabilities.textDocumentSync =
+      sync && typeof sync === "object" ? { ...sync, openClose: true, change: 1 } : { openClose: true, change: 1 };
+    process.stdout.write(withHeader(Buffer.from(JSON.stringify(msg), "utf8")));
+    return;
+  }
   if (msg && msg.method === "textDocument/publishDiagnostics" && !inScope(msg?.params?.uri)) return;
   process.stdout.write(withHeader(body));
 });

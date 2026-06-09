@@ -3,6 +3,16 @@
 All notable changes to this plugin are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 0.1.1 — 2026-06-08
+
+- **Fix document duplication.** The server duplicates a document's content on
+  `textDocument/didChange` (both full and incremental), producing spurious
+  `… already defined` errors after an edit. The proxy now advertises full
+  document sync and replays every change as a `didOpen`, which the server applies
+  correctly. Diagnostics stay accurate across edits.
+- Add `CIRCLECI_YAML_LSP_DEBUG=/path` to log proxy ⇄ server traffic for
+  troubleshooting.
+
 ## 0.1.0 — 2026-06-08
 
 Initial release.

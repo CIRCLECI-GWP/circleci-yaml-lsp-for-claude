@@ -81,6 +81,22 @@ right after the client's `initialized` notification, then swallows the replies (
 a sentinel string id, so Claude Code never sees them). This unlocks private-orb / context /
 self-hosted resolution, which Claude Code's LSP client otherwise has no way to trigger.
 
+### Working around the server's didChange bug
+
+Server 0.35.0 **duplicates a document's content when it receives a
+`textDocument/didChange`** (verified for both full-replace and incremental changes),
+producing spurious `… already defined` diagnostics. The server handles `didOpen`
+correctly, though. So the proxy:
+
+- rewrites the `initialize` response to advertise **full document sync**, and
+- mirrors each in-scope document's text and **replays every change as a `didOpen`**
+  (applying incremental edits to the mirror when needed), so the server only ever
+  sees opens.
+
+Set `CIRCLECI_YAML_LSP_DEBUG=/path/to/log` to record proxy ⇄ server traffic when
+diagnosing issues. If upstream fixes the `didChange` handling, this workaround can be
+removed.
+
 ## Diagnostics model
 
 The server is **push-only** (`textDocument/publishDiagnostics`); it does not implement pull

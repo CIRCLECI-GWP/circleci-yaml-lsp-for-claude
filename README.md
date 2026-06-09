@@ -87,6 +87,7 @@ profile).
 | `CIRCLECI_YAML_LSP_SCOPE_PATTERN` | Case-insensitive **regex** (matched against the file URI) overriding which files are in scope. Default matches config-named YAML under `.circleci/`. |
 | `CIRCLECI_YAML_LSP_TOKEN` | A [CircleCI API token](https://app.circleci.com/settings/user/tokens). Enables resolution of **private orbs**, contexts, and self-hosted runners. |
 | `CIRCLECI_YAML_LSP_SELF_HOSTED_URL` | Base URL of your CircleCI Server (self-hosted) installation. |
+| `CIRCLECI_YAML_LSP_DEBUG` | Path to a file; logs proxy ⇄ server traffic for troubleshooting. |
 
 Example (offline / pre-provisioned binary):
 
