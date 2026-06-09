@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/lib.test.mjs test/proxy.test.mjs",
-    "test:ci": "mkdir -p test-results && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-results/junit.xml test/lib.test.mjs test/proxy.test.mjs"
+    "test:ci": "mkdir -p test-results && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-results/junit.xml test/lib.test.mjs test/proxy.test.mjs",
+    "gen:hover-docs": "node scripts/gen-hover-docs.mjs",
+    "check:hover-docs": "node scripts/gen-hover-docs.mjs --check"
   },
   "license": "MIT"
 }

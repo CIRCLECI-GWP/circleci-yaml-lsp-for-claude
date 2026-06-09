@@ -120,6 +120,9 @@ export CIRCLECI_YAML_LSP_BINARY="$HOME/bin/linux-amd64-lsp"
   returns nothing). The plugin fills this in proxy-side using CircleCI's config schema,
   matching on the key name under the cursor. Lookup is by key name rather than full schema
   position, so a key used in multiple contexts resolves to its first schema definition.
+  The descriptions are generated from the `schema.json` of the server version pinned in the
+  launcher and are regenerated whenever that pin is bumped, so they track the pinned version
+  rather than upstream "latest".
 
 ## Windows
 

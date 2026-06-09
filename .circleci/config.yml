@@ -3,6 +3,11 @@ version: 2.1
 # CI for the circleci-yaml-lsp-for-claude plugin. No build step — this is a
 # Bash + Node project with no compiled output — just lint and test.
 
+parameters:
+  run-maintenance:
+    type: boolean
+    default: false
+
 jobs:
   lint:
     docker:
@@ -16,7 +21,7 @@ jobs:
             sudo apt-get install -y shellcheck
       - run:
           name: Lint shell scripts (shellcheck)
-          command: shellcheck plugins/circleci-yaml-lsp/bin/circleci-yaml-lsp scripts/update-pins.sh
+          command: shellcheck plugins/circleci-yaml-lsp/bin/circleci-yaml-lsp scripts/update-pins.sh scripts/open-upstream-update-pr.sh
       - run:
           name: Check JS syntax (node --check)
           command: |
@@ -31,6 +36,9 @@ jobs:
               node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" || exit 1
               echo "ok: $f"
             done
+      - run:
+          name: Hover docs are generated, not hand-edited
+          command: npm run check:hover-docs
 
   test:
     docker:
@@ -44,8 +52,33 @@ jobs:
           path: test-results
           when: always
 
+  upstream-update:
+    docker:
+      - image: cimg/node:lts
+    steps:
+      - checkout
+      - run:
+          name: Install gh CLI
+          command: |
+            sudo apt-get update -y && sudo apt-get install -y gh
+      - run:
+          name: Configure git identity
+          command: |
+            git config user.email "ci@circleci-yaml-lsp.local"
+            git config user.name "circleci-yaml-lsp bot"
+      - run:
+          name: Open upstream-bump PR if a newer release exists
+          command: bash scripts/open-upstream-update-pr.sh
+
 workflows:
   ci:
     jobs:
       - lint
       - test
+
+  maintenance:
+    when: << pipeline.parameters.run-maintenance >>
+    jobs:
+      - upstream-update:
+          context:
+            - gh-bot

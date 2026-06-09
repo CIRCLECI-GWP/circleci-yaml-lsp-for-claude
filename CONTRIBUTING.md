@@ -49,12 +49,16 @@ change must bump the version.
 To bump the pinned upstream language server:
 
 1. Set `VERSION` in `plugins/circleci-yaml-lsp/bin/circleci-yaml-lsp` to the new release tag.
-2. Regenerate the integrity pins and paste the printed `case` arms into the launcher:
+2. Regenerate the integrity pins **and** the schema-derived hover docs for the new version.
+   With `--write` the launcher's pin block is rewritten in place and the `HOVER_DOCS` table in
+   `lsp-hover.mjs` is regenerated from the new release's `schema.json` (both in lockstep):
    ```bash
-   scripts/update-pins.sh
+   scripts/update-pins.sh <version> --write
    ```
-   (The size **and** SHA-256 pins must match the new release, or the launcher will refuse to
-   run that platform's binary.)
+   Without `--write` the `case` arms are printed for manual pasting (the hover docs are still
+   regenerated). Either way, review the launcher and `lsp-hover.mjs` diffs. (The size **and**
+   SHA-256 pins must match the new release, or the launcher will refuse to run that platform's
+   binary.)
 3. Bump `version` in `plugins/circleci-yaml-lsp/.claude-plugin/plugin.json`.
 4. Update [`CHANGELOG.md`](CHANGELOG.md).
 5. Validate, commit, and (optionally) tag:
@@ -64,6 +68,11 @@ To bump the pinned upstream language server:
    ```
 
 For any other change (launcher/proxy fixes, `.lsp.json` tweaks), steps 3–5 still apply.
+
+Most upstream bumps are opened for you: a scheduled CircleCI job runs
+[`scripts/open-upstream-update-pr.sh`](scripts/open-upstream-update-pr.sh) and opens a PR
+performing steps 1–3 automatically when a newer stable release ships (it never merges — you
+still review the diff). See [Scheduled upstream updates](docs/DESIGN.md#scheduled-upstream-updates).
 
 ## Conventions
 
