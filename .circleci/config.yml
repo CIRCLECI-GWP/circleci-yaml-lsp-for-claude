@@ -79,4 +79,6 @@ workflows:
   maintenance:
     when: << pipeline.parameters.run-maintenance >>
     jobs:
-      - upstream-update
+      - upstream-update:
+          context:
+            - gh-bot

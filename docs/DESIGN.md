@@ -161,3 +161,50 @@ The pipeline was validated end-to-end, including inside a real Claude Code sessi
 - Bumping the server version is a two-step change: update `VERSION` **and** the size/SHA
   pins (run [`scripts/update-pins.sh`](../scripts/update-pins.sh)), then bump
   `plugin.json` `version`. See [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+### Scheduled upstream updates
+
+The server pin can also be bumped **automatically**. A gated CircleCI workflow
+(`maintenance` in [`.circleci/config.yml`](../.circleci/config.yml)) runs
+[`scripts/open-upstream-update-pr.sh`](../scripts/open-upstream-update-pr.sh), which checks
+whether upstream shipped a newer **stable** release than the pinned `VERSION` and, if so,
+opens a PR that bumps the pin, refreshes the binary size/SHA pins and the generated
+`HOVER_DOCS`, and patch-bumps the plugin version. **It never merges or pushes to `main`** —
+it only opens a PR for human review.
+
+The workflow is gated behind the `run-maintenance` pipeline parameter (default `false`), so
+normal pushes never trigger it. Two one-time setup steps (performed in the CircleCI
+dashboard/API, not in this repo) arm it:
+
+1. **A scheduled pipeline** that sets `run-maintenance: true` on a cadence (e.g. weekly).
+   Create it via **Project Settings → Triggers** in the dashboard, or the API:
+
+   ```bash
+   curl -X POST "https://circleci.com/api/v2/project/<project-slug>/schedule" \
+     -H "Circle-Token: $CIRCLE_TOKEN" -H "content-type: application/json" \
+     -d '{
+       "name": "weekly-upstream-check",
+       "description": "Open a PR when a newer language-server release ships",
+       "timetable": { "per-hour": 1, "hours-of-day": [13], "days-of-week": ["MON"] },
+       "attribution-actor": "current",
+       "parameters": { "run-maintenance": true, "branch": "main" }
+     }'
+   ```
+
+2. **A `gh-bot` context** holding a `GH_TOKEN` — a fine-grained PAT or GitHub App token with
+   `contents:write` + `pull_requests:write` on this repo. The `upstream-update` job already
+   references this context (`context: [gh-bot]`). In CI, `gh`/`git` authenticate from this
+   token; the local `env -u GITHUB_TOKEN` workaround used on developer machines does **not**
+   apply in CI.
+
+To exercise the path without waiting for the cron, trigger a one-off pipeline with the
+parameter set:
+
+```bash
+curl -X POST "https://circleci.com/api/v2/project/<project-slug>/pipeline" \
+  -H "Circle-Token: $CIRCLE_TOKEN" -H "content-type: application/json" \
+  -d '{"branch":"main","parameters":{"run-maintenance":true}}'
+```
+
+When upstream equals the pinned version, the job logs "already current; nothing to do" and
+opens no PR.
