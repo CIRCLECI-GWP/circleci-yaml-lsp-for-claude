@@ -33,3 +33,8 @@ for a in darwin-arm64-lsp darwin-amd64-lsp linux-amd64-lsp linux-arm64-lsp; do
   fi
   printf '    %-18s expected_size=%s; expected_sha="%s" ;;\n' "$a)" "$size" "$sha"
 done
+
+# Regenerate the schema-derived hover docs for this same VERSION so they stay in
+# lockstep with the pinned server. (Edits lsp-hover.mjs in place; review the diff.)
+echo "# regenerating hover docs for $VERSION" >&2
+node "$(cd "$(dirname "$0")/.." && pwd)/scripts/gen-hover-docs.mjs"
