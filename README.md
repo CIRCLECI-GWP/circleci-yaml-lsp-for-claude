@@ -1,4 +1,4 @@
-# CircleCI YAML LSP for Claude Code
+# CircleCI YAML Language Sever Protocol (LSP) for Claude Code
 
 A [Claude Code](https://claude.com/claude-code) plugin that wires up CircleCI's
 official [`circleci-yaml-language-server`](https://github.com/CircleCI-Public/circleci-yaml-language-server)
@@ -61,7 +61,7 @@ actions — Claude can use these through its LSP tooling.
 Claude Code routes files to a language server purely by **file extension**, and the
 CircleCI server treats *every* document it receives as a CircleCI config. A naïve
 `.yml → yaml` mapping would therefore make it mis-validate every unrelated YAML file
-(docker-compose, Kubernetes, GitHub Actions, Helm …). To avoid that, the plugin ships a
+(docker-compose, Kubernetes, Helm …). To avoid that, the plugin ships a
 tiny launcher and a stdio proxy:
 
 1. **`bin/circleci-yaml-lsp`** (launcher) detects your OS/arch, downloads the pinned
