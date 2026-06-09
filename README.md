@@ -1,4 +1,4 @@
-# CircleCI YAML Language Sever Protocol (LSP) for Claude Code
+# CircleCI YAML Language Server Protocol (LSP) for Claude Code
 
 A [Claude Code](https://claude.com/claude-code) plugin that wires up CircleCI's
 official [`circleci-yaml-language-server`](https://github.com/CircleCI-Public/circleci-yaml-language-server)
