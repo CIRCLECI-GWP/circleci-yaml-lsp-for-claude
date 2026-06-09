@@ -1,9 +1,10 @@
-// Unit tests for the pure helpers in lsp-proxy-lib.mjs.
+// Unit tests for the pure helpers in lsp-proxy-lib.mjs and lsp-hover.mjs.
 // Grouped under describe() so Node's JUnit reporter emits a <testsuite> (which
 // CircleCI's test-results parser requires).
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { makeInScope, posToOffset, applyEdits, frame, makeReader, DEFAULT_SCOPE } from "../plugins/circleci-yaml-lsp/bin/lsp-proxy-lib.mjs";
+import { doHover } from "../plugins/circleci-yaml-lsp/bin/lsp-hover.mjs";
 
 describe("lsp-proxy-lib (unit)", () => {
   test("makeInScope: default matches CircleCI config files under .circleci/", () => {
@@ -127,5 +128,72 @@ describe("lsp-proxy-lib (unit)", () => {
   test("DEFAULT_SCOPE is exported and case-insensitive", () => {
     assert.ok(DEFAULT_SCOPE instanceof RegExp);
     assert.equal(DEFAULT_SCOPE.test("file:///R/.CIRCLECI/CONFIG.YML"), true);
+  });
+});
+
+describe("lsp-hover (unit)", () => {
+  const CONFIG = [
+    "version: 2.1",
+    "jobs:",
+    "  build:",
+    "    docker:",
+    "      - image: cimg/node:lts",
+    "    working_directory: ~/project",
+    "    steps:",
+    "      - checkout",
+    "      - run:",
+    "          name: Test",
+    "          command: npm test",
+    "      - store_artifacts:",
+    "          path: dist",
+  ].join("\n");
+
+  test("returns markdown description for a known root key", () => {
+    // 'version' starts at line 0, character 0
+    const result = doHover(CONFIG, 0, 0);
+    assert.ok(result !== null, "should return a result");
+    assert.equal(result.contents.kind, "markdown");
+    assert.ok(result.contents.value.length > 10, "description should be non-trivial");
+  });
+
+  test("returns description for a known nested key", () => {
+    // 'working_directory' is on line 5, character 4
+    const result = doHover(CONFIG, 5, 4);
+    assert.ok(result !== null);
+    assert.ok(result.contents.value.includes("working_directory") || result.contents.value.includes("~/project"));
+  });
+
+  test("returns description for a known step key", () => {
+    // 'store_artifacts' is on line 11, character 8
+    const result = doHover(CONFIG, 11, 8);
+    assert.ok(result !== null);
+    assert.ok(result.contents.value.includes("artifact"));
+  });
+
+  test("resolves a key whose schema description lives on a oneOf branch (executor)", () => {
+    // Regression guard: 'executor' carries its markdownDescription on a oneOf branch,
+    // not directly on the property — shallow schema extraction misses it.
+    const text = "jobs:\n  build:\n    executor: my-exec\n";
+    const result = doHover(text, 2, 4); // 'executor' key
+    assert.ok(result !== null, "executor should resolve");
+    assert.ok(result.contents.value.toLowerCase().includes("executor"));
+  });
+
+  test("returns null for a user-defined name (not a schema key)", () => {
+    // 'build' (job name) is on line 2, character 2
+    const result = doHover(CONFIG, 2, 2);
+    assert.equal(result, null);
+  });
+
+  test("returns null for whitespace / empty position", () => {
+    assert.equal(doHover(CONFIG, 3, 0), null); // leading spaces before 'docker'
+  });
+
+  test("returns null for an out-of-bounds line", () => {
+    assert.equal(doHover(CONFIG, 999, 0), null);
+  });
+
+  test("returns null for empty text", () => {
+    assert.equal(doHover("", 0, 0), null);
   });
 });

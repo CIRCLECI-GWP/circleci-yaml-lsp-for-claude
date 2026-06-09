@@ -54,7 +54,10 @@ diagnostics your editor would:
 
 Beyond diagnostics, the server also provides go-to-definition / find-references across
 jobs, executors, commands and orbs, autocompletion, document symbols, and quick-fix code
-actions — Claude can use these through its LSP tooling.
+actions — Claude can use these through its LSP tooling. The plugin additionally serves
+**hover documentation** for CircleCI config keys (e.g. `executor`, `store_artifacts`,
+`working_directory`), sourced from CircleCI's published config schema — see
+[How it works](#how-it-works).
 
 ## How it works
 
@@ -71,6 +74,10 @@ tiny launcher and a stdio proxy:
    document-sync messages for files that look like CircleCI configs — config-named
    `*.yml`/`*.yaml` under a `.circleci/` directory. Everything else is left untouched, so
    unrelated YAML is never analyzed.
+3. The proxy also answers **`textDocument/hover`** itself: the upstream server advertises
+   the capability but returns nothing, so the proxy looks up the key under the cursor in
+   a table of descriptions extracted from CircleCI's config schema
+   (`bin/lsp-hover.mjs`). Out-of-scope files get an empty hover, same as document sync.
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the full architecture and rationale.
 
@@ -109,8 +116,10 @@ export CIRCLECI_YAML_LSP_BINARY="$HOME/bin/linux-amd64-lsp"
   you'll see false `Orb … does not exist or is private` errors on valid private orbs. Set
   [`CIRCLECI_YAML_LSP_TOKEN`](#environment-variables) (and `CIRCLECI_YAML_LSP_SELF_HOSTED_URL`
   for CircleCI Server) to fix this.
-- **Hover** is not implemented server-side (the official VS Code extension renders hovers
-  client-side).
+- **Hover** is not implemented by the upstream server (it advertises the capability but
+  returns nothing). The plugin fills this in proxy-side using CircleCI's config schema,
+  matching on the key name under the cursor. Lookup is by key name rather than full schema
+  position, so a key used in multiple contexts resolves to its first schema definition.
 
 ## Windows
 

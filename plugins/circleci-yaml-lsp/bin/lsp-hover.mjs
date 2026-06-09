@@ -1,0 +1,132 @@
+// Proxy-side hover for CircleCI YAML configs.
+//
+// The upstream circleci-yaml-language-server advertises hoverProvider but
+// returns null for all positions (stub as of 0.35.x). This module implements
+// hover directly: it finds the YAML key under the cursor and returns the
+// markdownDescription extracted from the CircleCI JSON Schema (schema.json).
+//
+// doHover(text, line, character) -> LSP Hover result object or null
+//   text      - full document text
+//   line      - 0-based line number
+//   character - 0-based character offset
+
+// Descriptions extracted from CircleCI's schema.json (pinned server 0.35.0).
+// Source: https://github.com/CircleCI-Public/circleci-yaml-language-server/blob/0.35.0/schema.json
+// For each property name we take the first markdownDescription found on the
+// property, or one level into its oneOf/anyOf/allOf/items/then/else/$ref. Lookup
+// is by key name (not full schema position), so a name used in multiple contexts
+// resolves to its first definition - a deliberate simplification for hover.
+
+const HOVER_DOCS = {
+  "add_ssh_keys": "https://circleci.com/docs/configuration-reference#add_ssh_keys\n\nSpecial step that adds SSH keys from a project's settings to a container. Also configures SSH to use these keys.",
+  "alias": "An alias for the matrix, usable from another job's requires stanza. Defaults to the name of the job being executed",
+  "and": "https://circleci.com/docs/configuration-reference#logic-statements\n\nLogical and: true when all statements in the list are true",
+  "at": "Directory to attach the workspace to",
+  "attach_workspace": "https://circleci.com/docs/configuration-reference#attach_workspace\n\nSpecial step used to attach the workflow's workspace to the current container. The full contents of the workspace are downloaded and copied into the directory the workspace is being attached at.",
+  "auth": "Authentication for registries using standard `docker login` credentials",
+  "auto_rerun_delay": "Delay before automatic rerun of this step",
+  "aws_auth": "Authentication for AWS EC2 Container Registry (ECR). You can use the access/secret keys or OIDC.",
+  "background": "Whether or not this step should run in the background (default: false)",
+  "branches": "A map defining rules for execution on specific branches",
+  "checkout": "https://circleci.com/docs/configuration-reference#checkout\n\nSpecial step used to check out source code to the configured `path` (defaults to the `working_directory`). The reason this is a special step is because it is more of a helper function designed to make checking out code easy for you. If you require doing git over HTTPS you should not use this step as it configures git to checkout over ssh.",
+  "circleci_ip_ranges": "Enable running jobs with a set of well-defined IP address ranges.",
+  "command": "Command to run via the shell",
+  "commands": "https://circleci.com/docs/configuration-reference#commands-requires-version-21\n\nA command definition defines a sequence of steps as a map to be executed in a job, enabling you to reuse a single command definition across multiple jobs.",
+  "condition": "A logical condition that must evaluate to true for the steps to run",
+  "context": "Either a single context name, or a list of contexts. The default name is `org-global`",
+  "cron": "See the [crontab man page](http://pubs.opengroup.org/onlinepubs/7908799/xcu/crontab.html)",
+  "depth": "The depth of the shallow clone. Only valid when `method` is set to 'shallow'. Must be a positive integer.",
+  "description": "A description of the parameter",
+  "destination": "Prefix added to the artifact paths in the artifacts API (default: the directory of the file specified in `path`)",
+  "docker": "Options for the [docker executor](https://circleci.com/docs/configuration-reference#docker)",
+  "docker_layer_caching": "Set to `true` to enable [Docker Layer Caching](https://circleci.com/docs/docker-layer-caching). Note: If you haven't already, you must open a support ticket to have a CircleCI Sales representative contact you about enabling this feature on your account for an additional fee.",
+  "enabled": "A boolean or a template parameter evaluating to a boolean",
+  "entrypoint": "The command used as executable when launching the container",
+  "enum": "List of allowed values for an `enum` type parameter",
+  "environment": "A map of environment variable names and values.",
+  "equal": "https://circleci.com/docs/configuration-reference#logic-statements\n\nTrue when all elements in the list are equal",
+  "exclude": "A list of argument maps that should be excluded from the matrix",
+  "executor": "https://circleci.com/docs/reference/reusing-config/#executor\n\nThe name of the executor to use (defined via the top level executors map or from an orb).",
+  "executors": "Executors define the environment in which the steps of a job will be run, allowing you to reuse a single executor definition across multiple jobs.",
+  "filters": "https://circleci.com/docs/reference/configuration-reference/#jobfilters \n\n A map or string to define filtering rules for job execution. Branch and tag filters require a map. Expression-based filters require a string.",
+  "fingerprints": "List of fingerprints corresponding to the keys to be added",
+  "ignore": "Either a single branch specifier, or a list of branch specifiers",
+  "image": "The name of a custom docker image to use",
+  "job-groups": "https://circleci.com/docs/reference/configuration-reference/#job-groups\n\nJob groups define named collections of jobs with internal dependency relationships that can be referenced as a single unit in workflows.",
+  "jobs": "Jobs are collections of steps. All of the steps in the job are executed in a single unit, either within a fresh container or VM.",
+  "key": "Required key for lock/unlock jobs.",
+  "keys": "List of cache keys to lookup for a cache to restore. Only first existing key will be restored.",
+  "machine": "Use the default machine executor image",
+  "macos": "Options for the [macOS executor](https://circleci.com/docs/configuration-reference#macos)",
+  "matches": "https://circleci.com/docs/configuration-reference#logic-statements\n\nTrue when value matches the pattern",
+  "matrix": "https://circleci.com/docs/configuration-reference#matrix-requires-version-21\n\nThe matrix stanza allows you to run a parameterized job multiple times with different arguments.",
+  "max_auto_reruns": "Maximum number of automatic reruns for this step",
+  "method": "The checkout method to be used ('blobless', 'full', or 'shallow', default 'full'). When using 'shallow', a positive `depth` value is required.",
+  "name": "Title of the step to be shown in the CircleCI UI (default: full `command`)",
+  "no_output_timeout": "Elapsed time the command can run without output. The string is a decimal with unit suffix, such as \"20m\", \"1.25h\", \"5s\" (default: 10 minutes)",
+  "not": "https://circleci.com/docs/configuration-reference#logic-statements\n\nLogical not: true when statement is false",
+  "only": "Either a single branch specifier, or a list of branch specifiers",
+  "or": "https://circleci.com/docs/configuration-reference#logic-statements\n\nLogical or: true when at least one statement in the list is true",
+  "orbs": "https://circleci.com/docs/configuration-reference#orbs-requires-version-21\n\nOrbs are reusable packages of CircleCI configuration that you may share across projects, enabling you to create encapsulated, parameterized commands, jobs, and executors that can be used across multiple projects.",
+  "parallelism": "A integer or a parameter evaluating to a integer",
+  "parameters": "https://circleci.com/docs/reusing-config#using-the-parameters-declaration\n\nA map of parameter keys.",
+  "path": "Checkout directory (default: job's `working_directory`)",
+  "paths": "List of directories which should be added to the cache",
+  "pattern": "Regular expression pattern to match against",
+  "persist_to_workspace": "https://circleci.com/docs/configuration-reference#persist_to_workspace\n\nSpecial step used to persist a temporary file to be used by another job in the workflow",
+  "plan_name": "Required plan name for release jobs.",
+  "requires": "Jobs are run in parallel by default, so you must explicitly require any dependencies by their job name.",
+  "resource_class": "https://circleci.com/docs/reference/configuration-reference/#resourceclass\n\nResource class for the job. Can be either a predefined resource class (e.g., `medium`, `large`) or a self-hosted runner in the format `<namespace>/<runner-name>`.",
+  "restore_cache": "https://circleci.com/docs/configuration-reference#restore_cache\n\nRestores a previously saved cache based on a `key`. Cache needs to have been saved first for this key using the `save_cache` step.",
+  "root": "Either an absolute path or a path relative to `working_directory`",
+  "run": "https://circleci.com/docs/configuration-reference#run\n\nUsed for invoking all command-line programs, taking either a map of configuration values, or, when called in its short-form, a string that will be used as both the `command` and `name`. Run commands are executed using non-login shells by default, so you must explicitly source any dotfiles as part of the command.",
+  "save_cache": "https://circleci.com/docs/configuration-reference#save_cache\n\nGenerates and stores a cache of a file or directory of files such as dependencies or source code in our object storage. Later jobs can restore this cache using the `restore_cache` step.",
+  "schedule": "A workflow may have a schedule indicating it runs at a certain time, for example a nightly build that runs every day at 12am UTC:",
+  "serial-group": "`serial-group` allows a group of jobs to run in series, rather than concurrently, across an organization. Serial groups control the orchestration of jobs across an organization, not just within projects and pipelines.\nSee <https://circleci.com/docs/reference/configuration-reference/#serial-group> for more details.",
+  "setup_remote_docker": "https://circleci.com/docs/configuration-reference#setup_remote_docker\n\nCreates a remote Docker environment configured to execute Docker commands.",
+  "shell": "Shell to use for execution command",
+  "steps": "A reference to a command or built-in step (e.g., `checkout`, `my-command`, or `orb-name/command-name`).",
+  "store_artifacts": "https://circleci.com/docs/configuration-reference#store_artifacts\n\nStep to store artifacts (for example logs, binaries, etc) to be available in the web app or through the API.",
+  "store_test_results": "https://circleci.com/docs/configuration-reference#storetestresults\n\nSpecial step used to upload test results so they display in builds' Test Summary section and can be used for timing analysis. To also see test result as build artifacts, please use the `store_artifacts` step.",
+  "tags": "A map defining rules for execution on specific tags",
+  "triggers": "Specifies which triggers will cause this workflow to be executed. Default behavior is to trigger the workflow when pushing to a branch.",
+  "type": "The job type. If not specified, defaults to build.",
+  "unless": "https://circleci.com/docs/configuration-reference#the-when-step-requires-version-21\n\nConditional step to run when custom conditions aren't met (determined at config-compile time) that are checked before a workflow runs",
+  "user": "Which user to run the command as",
+  "value": "Value to test against the pattern",
+  "version": "If your build requires a specific docker image, you can set it as an image attribute",
+  "when": "Specify when to enable or disable the step. Takes the following values: `always`, `on_success`, `on_fail` (default: `on_success`)",
+  "workflows": "Used for orchestrating all jobs. Each workflow consists of the workflow name as a key and a map as a value",
+  "working_directory": "In which directory to run the steps. (default: `~/project`. `project` is a literal string, not the name of the project.) You can also refer the directory with `$CIRCLE_WORKING_DIRECTORY` environment variable.",
+  "xcode": "The version of Xcode that is installed on the virtual machine, see the [Supported Xcode Versions section of the Testing iOS](https://circleci.com/docs/testing-ios#supported-xcode-versions) document for the complete list.",
+};
+
+// YAML key characters (letters, digits, hyphens, underscores, dots, slashes for orb refs).
+const KEY_CHAR = /[a-zA-Z0-9_\-.\/]/;
+
+// Find the word token at (line, character) in `text` (both 0-based).
+// Returns the token string, or null if the position is not on a word token.
+function tokenAt(text, line, character) {
+  const lines = text.split("\n");
+  if (line >= lines.length) return null;
+  const lineStr = lines[line];
+  if (character > lineStr.length) return null;
+
+  let start = character;
+  while (start > 0 && KEY_CHAR.test(lineStr[start - 1])) start--;
+  let end = character;
+  while (end < lineStr.length && KEY_CHAR.test(lineStr[end])) end++;
+
+  if (start === end) return null;
+  return lineStr.slice(start, end);
+}
+
+// Build an LSP Hover result for the given document text and cursor position.
+// Returns null if no documentation is available.
+export function doHover(text, line, character) {
+  const token = tokenAt(text, line, character);
+  if (!token) return null;
+  const desc = HOVER_DOCS[token];
+  if (!desc) return null;
+  return { contents: { kind: "markdown", value: desc } };
+}

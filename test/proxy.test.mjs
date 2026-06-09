@@ -152,4 +152,51 @@ describe("lsp-proxy (integration)", () => {
     assert.ok(ok, "in-scope diagnostics forwarded");
     assert.equal(diags.some((d) => d.params.uri === OUT), false, "out-of-scope diagnostics dropped");
   });
+
+  test("hover on in-scope file returns schema docs; server never sees the request", async () => {
+    const { proc, received, send } = startProxy();
+    initialize(send); await waitFor(() => received.some((m) => m.id === 1 && m.result));
+    initialized(send);
+    didOpen(send, IN, "version: 2.1\njobs:\n  build:\n    docker:\n      - image: cimg/base:current\n");
+    await waitFor(() => serverSaw(received).some((r) => r.method === "textDocument/didOpen"));
+    // Hover on 'version' at line 0, character 0
+    send({ jsonrpc: "2.0", id: 99, method: "textDocument/hover", params: { textDocument: { uri: IN }, position: { line: 0, character: 0 } } });
+    const ok = await waitFor(() => received.some((m) => m.id === 99));
+    const reply = received.find((m) => m.id === 99);
+    proc.kill();
+    assert.ok(ok, "received hover reply");
+    assert.ok(reply.result !== null, "result is not null");
+    assert.equal(reply.result.contents.kind, "markdown");
+    assert.ok(reply.result.contents.value.length > 0, "description is non-empty");
+    // The server must NOT have received a hover request (proxy handles it locally)
+    assert.equal(serverSaw(received).some((r) => r.method === "textDocument/hover"), false, "server never saw hover");
+  });
+
+  test("hover on out-of-scope file returns null; server never sees the request", async () => {
+    const { proc, received, send } = startProxy();
+    initialize(send); await waitFor(() => received.some((m) => m.id === 1 && m.result));
+    initialized(send);
+    send({ jsonrpc: "2.0", id: 98, method: "textDocument/hover", params: { textDocument: { uri: OUT }, position: { line: 0, character: 0 } } });
+    const ok = await waitFor(() => received.some((m) => m.id === 98));
+    const reply = received.find((m) => m.id === 98);
+    proc.kill();
+    assert.ok(ok, "received hover reply");
+    assert.equal(reply.result, null, "result is null for out-of-scope file");
+    assert.equal(serverSaw(received).some((r) => r.method === "textDocument/hover"), false, "server never saw hover");
+  });
+
+  test("hover on in-scope file for unknown key returns null", async () => {
+    const { proc, received, send } = startProxy();
+    initialize(send); await waitFor(() => received.some((m) => m.id === 1 && m.result));
+    initialized(send);
+    // 'my_custom_job' is a user-defined job name, not a schema key
+    didOpen(send, IN, "version: 2.1\njobs:\n  my_custom_job:\n    docker:\n      - image: cimg/base:current\n");
+    await waitFor(() => serverSaw(received).some((r) => r.method === "textDocument/didOpen"));
+    send({ jsonrpc: "2.0", id: 97, method: "textDocument/hover", params: { textDocument: { uri: IN }, position: { line: 2, character: 2 } } });
+    const ok = await waitFor(() => received.some((m) => m.id === 97));
+    const reply = received.find((m) => m.id === 97);
+    proc.kill();
+    assert.ok(ok, "received hover reply");
+    assert.equal(reply.result, null, "null for user-defined job name");
+  });
 });

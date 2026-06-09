@@ -1,6 +1,6 @@
 {
   "name": "circleci-yaml-lsp-for-claude",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Dev tooling and tests for the circleci-yaml-lsp Claude Code plugin. The plugin itself lives in plugins/circleci-yaml-lsp/ and ships no npm dependencies.",
   "type": "module",

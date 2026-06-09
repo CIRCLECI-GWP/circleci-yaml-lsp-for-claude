@@ -22,8 +22,10 @@
 //   CIRCLECI_YAML_LSP_DEBUG           path to a file; logs proxy <-> server traffic.
 
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { makeInScope, applyEdits, frame, makeReader } from "./lsp-proxy-lib.mjs";
+import { doHover } from "./lsp-hover.mjs";
 
 const serverBin = process.argv[2];
 if (!serverBin) {
@@ -42,6 +44,13 @@ const SYNC_METHODS = new Set([
   "textDocument/didClose",
   "textDocument/didSave",
   "textDocument/willSave",
+]);
+
+// Requests (have ids) that must be scoped to CircleCI configs. Out-of-scope
+// requests get a null result reply so the client receives a well-formed response
+// without the server ever seeing non-CircleCI YAML.
+const SCOPED_REQUEST_METHODS = new Set([
+  "textDocument/hover",
 ]);
 
 const TOKEN = process.env.CIRCLECI_YAML_LSP_TOKEN || "";
@@ -115,6 +124,29 @@ const fromClient = makeReader((msg, body) => {
     return;
   }
 
+  // Scoped requests: handle out-of-scope textDocument requests locally (null result)
+  // and serve hover for in-scope files from the proxy's own schema-based provider,
+  // since the upstream server advertises hoverProvider but returns null (stub, 0.35.x).
+  if (msg && msg.id != null && SCOPED_REQUEST_METHODS.has(msg.method)) {
+    const uri = msg?.params?.textDocument?.uri;
+    if (!inScope(uri)) {
+      process.stdout.write(frame(Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: null }), "utf8")));
+      return;
+    }
+    if (msg.method === "textDocument/hover") {
+      const pos = msg.params?.position;
+      let text = docText.get(uri);
+      if (text == null && uri && uri.startsWith("file://")) {
+        // Proxy just started (e.g. after plugin reload) and hasn't received didOpen yet.
+        // Fall back to reading the file from disk so hover works immediately.
+        try { text = readFileSync(fileURLToPath(uri), "utf8"); } catch { /* file unreadable */ }
+      }
+      const result = (pos != null && text) ? doHover(text, pos.line, pos.character) : null;
+      process.stdout.write(frame(Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: result ?? null }), "utf8")));
+      return;
+    }
+  }
+
   server.stdin.write(frame(body));
   // After initialization, optionally authenticate for private orbs / self-hosted.
   if (msg && msg.method === "initialized") {
@@ -135,6 +167,10 @@ const fromServer = makeReader((msg, body) => {
     const sync = msg.result.capabilities.textDocumentSync;
     msg.result.capabilities.textDocumentSync =
       sync && typeof sync === "object" ? { ...sync, openClose: true, change: 1 } : { openClose: true, change: 1 };
+    // The server already advertises hoverProvider but its implementation returns null
+    // for all positions (stub as of 0.35.x). Preserve it so hover wires up automatically
+    // once the upstream server starts returning real results.
+    if (!msg.result.capabilities.hoverProvider) msg.result.capabilities.hoverProvider = true;
     process.stdout.write(frame(Buffer.from(JSON.stringify(msg), "utf8")));
     return;
   }

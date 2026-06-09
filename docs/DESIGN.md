@@ -56,6 +56,8 @@ stdio) and the server (a child it spawns with `-stdio`). It forwards everything 
 - **Document-sync notifications** (`didOpen`/`didChange`/`didClose`) for files **not** in
   scope are dropped, so the server never sees — and never diagnoses — non-CircleCI YAML.
 - **`publishDiagnostics`** for out-of-scope URIs are dropped defensively.
+- **`textDocument/hover`** is answered by the proxy itself (see [Hover](#hover) below)
+  rather than forwarded; out-of-scope hover requests get an empty result.
 
 "In scope" defaults to the regex `(^|/)\.circleci/([^/]*_)?config\.ya?ml$` — a CircleCI config
 file directly under a `.circleci/` directory: `config.yml`/`.yaml`, or a `<prefix>_config.yml`
@@ -63,8 +65,22 @@ continuation config (e.g. `continue_config.yml`, `setup_config.yml`). It exclude
 YAML kept beside them (`test-suites.yml`, `eslint.config.yml`, `db-config.yml`) and helper
 files in subdirectories. Override with `CIRCLECI_YAML_LSP_SCOPE_PATTERN`.
 
-Forwarding requests (completion, definition, …) unchanged is safe: for a document the
+Forwarding other requests (completion, definition, …) unchanged is safe: for a document the
 server never opened it simply replies empty, so there's no hang or hard error.
+
+### Hover
+
+The server advertises `hoverProvider` but its implementation returns `null` for every
+position (a stub as of 0.35.x), so forwarding hover would always yield nothing. Instead the
+proxy answers `textDocument/hover` itself from `bin/lsp-hover.mjs`: it finds the key token
+under the cursor and looks it up in a table of descriptions extracted from CircleCI's
+published config schema (`schema.json`). The extraction takes each property's
+`markdownDescription`, falling back one level into `oneOf`/`anyOf`/`allOf`/`items`/`then`/
+`else`/`$ref` so keys whose docs live on a schema branch (e.g. `executor`) are still
+covered. Lookup is by key **name**, not full schema position — a deliberate simplification,
+so a name used in multiple contexts resolves to its first schema definition. In-scope text
+comes from the proxy's document mirror, falling back to reading the file from disk when the
+proxy started after the document was already open (e.g. a plugin reload).
 
 **Why Node, and why fail closed without it.** The proxy needs a runtime; Node is the
 pragmatic choice because Claude Code itself is a Node application, so it's almost always
