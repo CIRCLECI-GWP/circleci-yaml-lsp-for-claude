@@ -1,0 +1,48 @@
+version: 2.1
+
+# CI for the circleci-yaml-lsp-for-claude plugin. No build step — this is a
+# Bash + Node project with no compiled output — just lint and test.
+
+jobs:
+  lint:
+    docker:
+      - image: cimg/node:lts
+    steps:
+      - checkout
+      - run:
+          name: Install shellcheck
+          command: |
+            sudo apt-get update -y
+            sudo apt-get install -y shellcheck
+      - run:
+          name: Lint shell scripts (shellcheck)
+          command: shellcheck plugins/circleci-yaml-lsp/bin/circleci-yaml-lsp scripts/update-pins.sh
+      - run:
+          name: Check JS syntax (node --check)
+          command: |
+            for f in $(git ls-files '*.mjs'); do
+              node --check "$f" && echo "ok: $f"
+            done
+      - run:
+          name: Validate JSON manifests
+          command: |
+            for f in $(git ls-files '*.json'); do
+              node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" && echo "ok: $f"
+            done
+
+  test:
+    docker:
+      - image: cimg/node:lts
+    steps:
+      - checkout
+      - run:
+          name: Run test suite
+          command: npm run test:ci
+      - store_test_results:
+          path: test-results
+
+workflows:
+  ci:
+    jobs:
+      - lint
+      - test

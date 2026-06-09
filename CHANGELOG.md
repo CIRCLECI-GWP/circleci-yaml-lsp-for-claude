@@ -3,6 +3,14 @@
 All notable changes to this plugin are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 0.1.3 — 2026-06-08
+
+- Launcher: shellcheck-clean `CDPATH` handling when resolving the script directory
+  (behavior unchanged).
+- Repo: add CircleCI CI (`lint` + `test`, no build); the `test` job emits a JUnit report
+  via Node's test runner and stores it with `store_test_results`. The config was written and
+  validated with this plugin's own LSP.
+
 ## 0.1.2 — 2026-06-08
 
 - Internal: extract the proxy's pure helpers into `lsp-proxy-lib.mjs` and add a test suite

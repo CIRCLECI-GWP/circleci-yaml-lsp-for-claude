@@ -10,3 +10,6 @@ node_modules/
 
 # Logs
 *.log
+
+# Generated test reports (CI)
+test-results/

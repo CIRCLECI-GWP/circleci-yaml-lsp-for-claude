@@ -103,7 +103,7 @@ fi
 [ -x "$SERVER_BIN" ] || die "language server binary is not executable: $SERVER_BIN"
 
 # Find the scoping proxy shipped alongside this script.
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+SCRIPT_DIR="$(unset CDPATH; cd -- "$(dirname -- "$0")" && pwd)"
 PROXY="$SCRIPT_DIR/lsp-proxy.mjs"
 
 find_node() {
