@@ -11,9 +11,20 @@ launcher="$root/plugins/circleci-yaml-lsp/bin/circleci-yaml-lsp"
 plugin_json="$root/plugins/circleci-yaml-lsp/.claude-plugin/plugin.json"
 pkg_json="$root/package.json"
 
-latest="$(node "$root/scripts/check-upstream-release.mjs")" || {
-  echo "already current; nothing to do" >&2; exit 0;
-}
+# check-upstream-release.mjs exit codes: 0 = actionable update (tag on stdout),
+# 3 = nothing to do (already current, or latest release's assets aren't fully
+# uploaded yet), anything else = a real error (unreadable VERSION, GitHub API
+# down/rate-limited). Swallow ONLY 3 as a clean no-op; let real errors fail the
+# job loudly so a silently-stalled bump can't masquerade as a green build.
+if latest="$(node "$root/scripts/check-upstream-release.mjs")"; then
+  : # actionable update; fall through
+else
+  rc=$?
+  if [ "$rc" -eq 3 ]; then
+    echo "already current or upstream not ready; nothing to do" >&2; exit 0
+  fi
+  echo "check-upstream-release.mjs failed (exit $rc)" >&2; exit "$rc"
+fi
 # The tag is interpolated into a branch name, a git ref, and shell commands — refuse
 # anything that isn't a plain version token before using it.
 if ! printf '%s' "$latest" | grep -qE '^v?[0-9][0-9A-Za-z.+_-]*$'; then
