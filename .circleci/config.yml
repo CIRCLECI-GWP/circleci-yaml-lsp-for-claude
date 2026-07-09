@@ -67,6 +67,13 @@ jobs:
             git config user.email "ci@circleci-yaml-lsp.local"
             git config user.name "circleci-yaml-lsp bot"
       - run:
+          name: Authenticate git pushes with the gh-bot token
+          # The built-in checkout key is read-only, so a plain `git push` fails
+          # with "key ... marked as read only" even though GH_TOKEN (from the
+          # gh-bot context) has write access. `gh auth setup-git` registers gh
+          # as git's credential helper so push/fetch use that token too.
+          command: gh auth setup-git
+      - run:
           name: Open upstream-bump PR if a newer release exists
           command: bash scripts/open-upstream-update-pr.sh
 
