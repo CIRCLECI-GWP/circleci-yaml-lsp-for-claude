@@ -1,7 +1,7 @@
 {
   "$schema": "https://www.schemastore.org/claude-code-plugin-manifest.json",
   "name": "circleci-yaml-lsp",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "CircleCI config language server for Claude Code: diagnostics, go-to-definition/references, hover docs, and validation for .circleci/config.yml, powered by CircleCI's circleci-yaml-language-server.",
   "author": {
     "name": "Roger Winter",
@@ -10,6 +10,13 @@
   "homepage": "https://github.com/rogerwintercircleci/circleci-yaml-lsp-for-claude",
   "repository": "https://github.com/rogerwintercircleci/circleci-yaml-lsp-for-claude",
   "license": "MIT",
-  "keywords": ["circleci", "yaml", "lsp", "language-server", "ci-cd", "config"],
+  "keywords": [
+    "circleci",
+    "yaml",
+    "lsp",
+    "language-server",
+    "ci-cd",
+    "config"
+  ],
   "lspServers": "./.lsp.json"
 }
