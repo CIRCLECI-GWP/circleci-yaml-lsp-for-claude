@@ -68,11 +68,15 @@ jobs:
             git config user.name "circleci-yaml-lsp bot"
       - run:
           name: Authenticate git pushes with the gh-bot token
-          # The built-in checkout key is read-only, so a plain `git push` fails
-          # with "key ... marked as read only" even though GH_TOKEN (from the
-          # gh-bot context) has write access. `gh auth setup-git` registers gh
-          # as git's credential helper so push/fetch use that token too.
-          command: gh auth setup-git
+          # checkout's `origin` remote is SSH, authenticated with CircleCI's
+          # own read-only deploy key — `gh auth setup-git` only wires up an
+          # HTTPS credential helper, which an SSH remote never consults. Point
+          # origin at HTTPS with the write-scoped gh-bot token embedded so
+          # `git push` actually uses it.
+          command: |
+            token="${GH_TOKEN:-$GITHUB_TOKEN}"
+            slug="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+            git remote set-url origin "https://x-access-token:${token}@github.com/${slug}.git"
       - run:
           name: Open upstream-bump PR if a newer release exists
           command: bash scripts/open-upstream-update-pr.sh
