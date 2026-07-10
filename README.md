@@ -29,7 +29,7 @@ on first use (no Go toolchain required) and verifies it before running.
 ## Install
 
 ```text
-/plugin marketplace add rogerwintercircleci/circleci-yaml-lsp-for-claude
+/plugin marketplace add CIRCLECI-GWP/circleci-yaml-lsp-for-claude
 /plugin install circleci-yaml-lsp@circleci-lsp
 /reload-plugins
 ```
